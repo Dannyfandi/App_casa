@@ -2,32 +2,54 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import json
-import os
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 # --- CONFIGURATION ---
 ROOMIES = ["Ale", "Ferb", "Fandi"]
 CATS_PARENTS = ["Ale", "Fandi"]
-DATA_FILE = "roomie_data.json"
+SHEET_NAME = "RoomieData" # Make sure this matches your Sheet Name exactly
 
-# --- PAGE SETUP ---
-st.set_page_config(page_title="RoomieSync", page_icon="🏠", layout="centered")
+# --- GOOGLE SHEETS CONNECTION ---
+def get_google_sheet_client():
+    # We will load credentials from Streamlit Secrets (Step 4)
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    return client
 
-# --- DATA MANAGEMENT ---
+# --- DATA MANAGEMENT (CLOUD VERSION) ---
 def load_data():
-    if not os.path.exists(DATA_FILE):
-        # Initialize empty structure
-        return {
-            "tasks": [],
-            "bills": [],
-            "shopping": [],
-            "furniture": []
-        }
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    try:
+        client = get_google_sheet_client()
+        sheet = client.open(SHEET_NAME).sheet1
+        # We read the data from cell A1 where we store the big JSON
+        data_raw = sheet.cell(1, 1).value
+        
+        if not data_raw:
+            # If cell is empty, return default structure
+            return {
+                "tasks": [],
+                "bills": [],
+                "shopping": [],
+                "furniture": []
+            }
+        return json.loads(data_raw)
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return {"tasks": [], "bills": [], "shopping": [], "furniture": []}
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f)
+    try:
+        client = get_google_sheet_client()
+        sheet = client.open(SHEET_NAME).sheet1
+        # Convert the whole data object to a string and save in Cell A1
+        # This is a simple hack to keep your data structure without complex SQL
+        json_str = json.dumps(data)
+        sheet.update_cell(1, 1, json_str) 
+    except Exception as e:
+        st.error(f"Error saving data: {e}")
 
 # Initialize Session State
 if 'data' not in st.session_state:
